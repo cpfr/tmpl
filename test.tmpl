@@ -1,0 +1,44 @@
+<html>
+<head>
+    <title>Tmpl Test</title>
+    <meta charset="UTF-8"/>
+</head>
+<body>
+<h1>Tmpl - sounds like "simple"</h1>
+
+<h3>Some arithmetics</h3>
+<ul>
+    <li>{{ x }} + {{ y.z }} = {{ x + y.z }}</li>
+    <li>{{ x }} - {{ y.z }} = {{ x - y.z }}</li>
+    <li>{{ x }} * {{ y.z }} = {{ x * y.z }}</li>
+    <li>{{ x }} / {{ y.z }} = {{ x / y.z }}</li>
+    <li>{{ x }} % {{ y.z }} = {{ x % y.z }}</li>
+    <li>{{ 2.5 }} * {{ 2 }} = {{ 2.5*2 }}</li>
+</ul>
+
+<h3>Hallo Welt</h3>
+{{"a"}} {{ "abc" }} <br/>
+{% if "a" in "abc" %}
+    {{ x }} - {{ y.z }} = {{ x - y.z }}
+{% end %}
+{# Just ignore this comment #}
+<br>
+<ul>
+{% for i in objects %}
+<li>{{ x }}x {{ i }}</li>
+{% end %}
+</ul>
+<br>
+<h1>International</h1>
+{% if lang == "es" %}
+    ¡Hola Mundo!
+    {% if not verbose %}
+        ¿Como estás?
+    {% end %}
+{% else %}
+    {{ x }}
+    Hello World!
+    {{ x }}
+{% end %}
+</body>
+</html>
