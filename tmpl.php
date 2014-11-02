@@ -8,9 +8,12 @@ class Tmpl
 {
     protected $tokens = array();
     protected $ast = array();
+    protected $blocks = array();
+    protected $filename = '';
 
     public function __construct($filename){
-        $this->tree = $this->parse(file_get_contents($filename));
+        $this->filename = $filename;
+        $this->ast = $this->parse(file_get_contents($filename));
     }
 
     protected function parse($input){
@@ -45,6 +48,9 @@ class Tmpl
                 else if(substr($match, 0, 5) == 'block'){
                     $controlTokens[] = new Token($match, 'BlockToken');
                 }
+                else if(substr($match, 0, 7) == 'extends'){
+                    $controlTokens[] = new Token($match, 'ExtendsToken');
+                }
                 else if(substr($match, 0, 3) == 'end'){
                     $controlTokens[] = new Token($match, 'EndToken');
                 }
@@ -56,7 +62,7 @@ class Tmpl
                 // throw away the result -- it's just a comment
                 // empty text token for the number of text and
                 // control tokens to be balanced
-                $controlTokens[] = new Token('', 'TextToken');
+                $controlTokens[] = new Token('', 'CommentToken');
             }
             else{
                 $controlTokens[] = new Token($match, 'TextToken');
@@ -73,10 +79,69 @@ class Tmpl
             $tokenstream[] = $rest[$i];
             $tokenstream[] = $controlTokens[$i];
         }
-        $tokenstream[] = $rest[count($rest)-1]; // also add the last element
+        // also add the last element
+        $tokenstream[] = $rest[count($rest)-1];
+        
+        // filter out comments and empty text tokens
+        $tokenstream = array_values(
+            array_filter($tokenstream, function($element){
+                return ($element->getType() != 'CommentNode')
+                    && (trim($element->getText()) != '');
+        }));
 
-        $parser = new TmplParser($tokenstream);
-        $this->ast = $parser->parse();
+       
+        // check whether we're extending another template:
+        if($tokenstream[0]->getType() == 'ExtendsToken'){
+            // take the token out of the stream to prevent parsing errors
+            $extends = array_shift($tokenstream);
+            
+            // get the name of the extended file
+            $extends = $extends->getText();
+            $extends = trim($extends, '{%} ');
+            $extends = Lexer::lex($extends);
+            $filename = null;
+            foreach($extends as $item){
+                if($item->getType() == 'StringToken'){
+                    $filename = $item->getText();
+                    break;
+                }
+            }
+            if(!$filename){
+                throw new ContextException(
+                    'The file to be extended was not specified properly');
+            }
+            $filename = getStringValue($filename);
+            
+            if($filename == $this->filename){
+                throw new ContextException('A file can not extend itself!');
+            }
+            
+            // parse the parent template
+            $parentAST = $this->parse(file_get_contents($filename));
+            $parser = new TmplParser($tokenstream, $this);
+            $ownAST = $parser->parse();
+            return $parentAST;
+        }
+        else{
+            $parser = new TmplParser($tokenstream, $this);
+            return $parser->parse();
+        }
+    }
+    
+    public function registerBlock($block){
+        // make array if ther is not already one
+        if(!array_key_exists($block->getName(), $this->blocks)){
+            $this->blocks[$block->getName()] = array();
+        }
+        // if there is already a block, set parent and child of both
+        else{
+            $parent = $this->blocks[$block->getName()]
+                                [count($this->blocks[$block->getName()])-1];
+            $parent->setChild($block);
+            $block->setParent($parent);
+        }
+        // add the new block
+        $this->blocks[$block->getName()][] = $block;
     }
 
     public function render($params){
@@ -138,7 +203,10 @@ class Parser
 
 class TmplParser extends Parser
 {
-    public function __construct($tokenstream){
+    protected $tmpl;
+    
+    public function __construct($tokenstream, $tmpl){
+        $this->tmpl = $tmpl;
         parent::__construct($tokenstream);
     }
 
@@ -157,6 +225,11 @@ class TmplParser extends Parser
         }
         else if($this->currentType() == 'OutputToken'){
             return $this->parseOutput();
+        }
+        else if($this->currentType() == 'ExtendsToken'){
+            throw new SyntaxException($this->current(),
+                'Text, If, For or Output',
+                'An extends-declaration must be the first one in a tmpl file!');
         }
         else{
             throw new SyntaxException($this->current(),
@@ -228,7 +301,7 @@ class TmplParser extends Parser
     }
     
     protected function parseBlock(){
-        $node = new BlockNode($this->current());
+        $node = new BlockNode($this->current(), $this->tmpl);
         $this->accept('BlockToken');
         while($this->currentType() != 'EndToken'){
             $node->addBody($this->parseStep());
@@ -412,14 +485,7 @@ class ExpressionParser extends Parser
     protected function parseString(){
         $value = $this->current()->getText();
         $this->accept('StringToken');
-        $value = substr($value, 1, strlen($value)-2);
-        $value = str_replace('\"', '"', $value);
-        $value = str_replace('\n', "\n", $value);
-        $value = str_replace('\r', "\r", $value);
-        $value = str_replace('\t', "\t", $value);
-        $value = str_replace('\v', "\v", $value);
-        $value = str_replace('\f', "\f", $value);
-        $value = str_replace("\\\\", "\\", $value);
+        $value = getStringValue($value);
         return new ValueNode($value);
     }
 
@@ -703,8 +769,10 @@ class BlockNode
 {
     protected $name = '';
     protected $body = array();
+    protected $child = null;
+    protected $parent = null;
 
-    public function __construct($token){
+    public function __construct($token, $tmpl){
         $text = trim($token->getText(), '{%');
         $text = trim($text, '%}');
         $text = trim($text);
@@ -712,6 +780,7 @@ class BlockNode
         $text = trim($text);
 
         $this->name = $text;
+        $tmpl->registerBlock($this);
     }
 
     public function setBody($nodeArray){
@@ -721,19 +790,53 @@ class BlockNode
     public function addBody($node){
         $this->body[] = $node;
     }
+    
+    public function setChild($block){
+        $this->child = $block;
+    }
+    
+    public function setParent($block){
+        $this->parent = $block;
+    }
+    
+    public function getChild(){
+        return $this->child;
+    }
+    
+    public function getParent(){
+        return $this->parent;
+    }
+    
+    public function getUltimateChild(){
+        $child = $this;
+        while($child->getChild() != null){
+            $child = $child->getChild();
+        }
+        return $child;
+    }
+    
+    public function getName(){
+        return $this->name;
+    }
+    
+    public function getUltimateParent(){
+        $parent = $this;
+        while($parent->getParent() != null){
+            $parent = $parent->getParent();
+        }
+        return $parent;
+    }
 
     public function evaluate($params){
+        if($this->child){
+            return $this->getUltimateChild()->evaluate($params);
+        }
+
         $output = '';
-//         $collection = $this->collection->evaluate($params);
-// 
-//         foreach($collection as $i){
-//             foreach($this->body as $slice){
-//                 // set iterator variable
-//                 $params[$this->iterator] = $i;
-//                 // evaluate body
-//                 $output .= $slice->evaluate($params);
-//             }
-//         }
+        foreach($this->body as $slice){
+            // evaluate body
+            $output .= $slice->evaluate($params);
+        }
         return $output;
     }
 }
@@ -878,6 +981,18 @@ class Token
     }
 }
 
+function getStringValue($value){
+    $value = substr($value, 1, strlen($value)-2);
+    $value = str_replace('\"', '"', $value);
+    $value = str_replace('\n', "\n", $value);
+    $value = str_replace('\r', "\r", $value);
+    $value = str_replace('\t', "\t", $value);
+    $value = str_replace('\v', "\v", $value);
+    $value = str_replace('\f', "\f", $value);
+    $value = str_replace("\\\\", "\\", $value);
+    return $value;
+}
+
 // usage:
 // -----------------------------------------------------------------------------
 // $a = new Tmpl('test.tmpl');
@@ -888,4 +1003,8 @@ class Token
 //         'y'         => array('z' => 7),
 //         'objects'   => array('Banane', 'Birne', 'Zitrone')
 // ));
+
+//         echo "<textarea style=\"width: 100%; height: 100%;\">";
+//         print_r($tokenstream);
+//         echo "</textarea>";
 ?>

@@ -1,7 +1,7 @@
 ## Classes
 ### Tmpl
 - __construct($filename)
-- parse($input)
+- parse($input) : array<Node\>
 - render($params) : string
 
 ### Lexer
@@ -77,7 +77,7 @@
 - evaluate($params) : string
 
 ### IfNode
-*a node which contains an if statement (and possibly its elif and else blocks) *
+*a node which contains an if statement (and possibly its elif and else blocks)*
 
 - __construct($token)
 - evaluate($params) : string
@@ -93,7 +93,22 @@
 - evaluate($params) : string
 - setBody($nodeArray)
 - addBody($node)
-    
+
+### BlockNode
+*a node which contains a block*
+
+- __construct($token)
+- evaluate($params) : string
+- setBody($nodeArray)
+- addBody($node)
+- setChild($block)
+- setParent($block)
+- getChild() : BlockNode
+- getParent() : BlockNode
+- getUltimateChild() : BlockNode
+- getUltimateParent() : BlockNode
+- getName() : string
+
 ### UnaryOperatorNode
 **Expression:** *a node which contains a unary operator and an expression to which it should be applied*
 
