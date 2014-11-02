@@ -554,7 +554,7 @@ class VariableNode
                     }
                     // object --> getAttribute or getter method
                     else if(gettype($val) == 'object'){
-                        if(property_exists($val, $attr)){
+                        if(array_key_exists($attr, get_object_vars($val))){
                             $val = $val->$attr;
                         }
                         else if(method_exists($val, $attr)){
