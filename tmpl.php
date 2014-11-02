@@ -54,6 +54,13 @@ class Tmpl
                 else if(substr($match, 0, 3) == 'end'){
                     $controlTokens[] = new Token($match, 'EndToken');
                 }
+                else if(substr($match, 0, 7) == 'include'){
+                    $controlTokens[] = new Token($match, 'IncludeToken');
+                }
+                else{
+                    throw new SyntaxException(null, null,
+                              "Invalid statement {% ".$match." %}");
+                }
             }
             else if($controlChar == '{{'){
                 $controlTokens[] = new Token($match, 'OutputToken');
@@ -81,7 +88,7 @@ class Tmpl
         }
         // also add the last element
         $tokenstream[] = $rest[count($rest)-1];
-        
+
         // filter out comments and empty text tokens
         $tokenstream = array_values(
             array_filter($tokenstream, function($element){
@@ -89,33 +96,17 @@ class Tmpl
                     && (trim($element->getText()) != '');
         }));
 
-       
+
         // check whether we're extending another template:
         if($tokenstream[0]->getType() == 'ExtendsToken'){
             // take the token out of the stream to prevent parsing errors
             $extends = array_shift($tokenstream);
-            
-            // get the name of the extended file
-            $extends = $extends->getText();
-            $extends = trim($extends, '{%} ');
-            $extends = Lexer::lex($extends);
-            $filename = null;
-            foreach($extends as $item){
-                if($item->getType() == 'StringToken'){
-                    $filename = $item->getText();
-                    break;
-                }
-            }
-            if(!$filename){
-                throw new ContextException(
-                    'The file to be extended was not specified properly');
-            }
-            $filename = getStringValue($filename);
-            
+            $filename = getStringParameterFromToken($extends);
+
             if($filename == $this->filename){
                 throw new ContextException('A file can not extend itself!');
             }
-            
+
             // parse the parent template
             $parentAST = $this->parse(file_get_contents($filename));
             $parser = new TmplParser($tokenstream, $this);
@@ -127,7 +118,7 @@ class Tmpl
             return $parser->parse();
         }
     }
-    
+
     public function registerBlock($block){
         // make array if ther is not already one
         if(!array_key_exists($block->getName(), $this->blocks)){
@@ -204,7 +195,7 @@ class Parser
 class TmplParser extends Parser
 {
     protected $tmpl;
-    
+
     public function __construct($tokenstream, $tmpl){
         $this->tmpl = $tmpl;
         parent::__construct($tokenstream);
@@ -225,6 +216,9 @@ class TmplParser extends Parser
         }
         else if($this->currentType() == 'OutputToken'){
             return $this->parseOutput();
+        }
+        else if($this->currentType() == 'IncludeToken'){
+            return $this->parseInclude();
         }
         else if($this->currentType() == 'ExtendsToken'){
             throw new SyntaxException($this->current(),
@@ -299,7 +293,7 @@ class TmplParser extends Parser
         $this->accept('EndToken');
         return $node;
     }
-    
+
     protected function parseBlock(){
         $node = new BlockNode($this->current(), $this->tmpl);
         $this->accept('BlockToken');
@@ -313,6 +307,12 @@ class TmplParser extends Parser
     protected function parseOutput(){
         $node = new OutputNode($this->current());
         $this->accept('OutputToken');
+        return $node;
+    }
+
+    protected function parseInclude(){
+        $node = new IncludeNode($this->current());
+        $this->accept('IncludeToken');
         return $node;
     }
 }
@@ -790,23 +790,23 @@ class BlockNode
     public function addBody($node){
         $this->body[] = $node;
     }
-    
+
     public function setChild($block){
         $this->child = $block;
     }
-    
+
     public function setParent($block){
         $this->parent = $block;
     }
-    
+
     public function getChild(){
         return $this->child;
     }
-    
+
     public function getParent(){
         return $this->parent;
     }
-    
+
     public function getUltimateChild(){
         $child = $this;
         while($child->getChild() != null){
@@ -814,11 +814,11 @@ class BlockNode
         }
         return $child;
     }
-    
+
     public function getName(){
         return $this->name;
     }
-    
+
     public function getUltimateParent(){
         $parent = $this;
         while($parent->getParent() != null){
@@ -958,6 +958,20 @@ class ValueNode
         return $this->value;
     }
 }
+
+class IncludeNode
+{
+    protected $tmpl;
+    public function __construct($token){
+        $filename = getStringParameterFromToken($token);
+        $this->tmpl = new Tmpl($filename);
+    }
+
+    public function evaluate($params){
+        return $this->tmpl->render($params);
+    }
+}
+
 // -----------------------------------------------------------------------------
 // Token classes
 // -----------------------------------------------------------------------------
@@ -979,6 +993,27 @@ class Token
     public function getType(){
         return $this->type;
     }
+}
+
+
+function getStringParameterFromToken($token){
+    // get the name of the extended file
+    $text = $token->getText();
+    $text = trim($text, '{%} ');
+    $text = Lexer::lex($text);
+    $string = null;
+    foreach($text as $item){
+        if($item->getType() == 'StringToken'){
+            $string = $item->getText();
+            break;
+        }
+    }
+    if(!$string){
+        throw new SyntaxException($token, null,
+            'Could not read string parameter from token \''.
+            $token->getText().'\'');
+    }
+    return getStringValue($string);
 }
 
 function getStringValue($value){
