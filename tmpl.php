@@ -57,6 +57,9 @@ class Tmpl
                 else if(substr($match, 0, 7) == 'include'){
                     $controlTokens[] = new Token($match, 'IncludeToken');
                 }
+                else if(substr($match, 0, 6) == 'parent'){
+                    $controlTokens[] = new Token($match, 'ParentToken');
+                }
                 else{
                     throw new SyntaxException(null, null,
                               "Invalid statement {% ".$match." %}");
@@ -195,6 +198,7 @@ class Parser
 class TmplParser extends Parser
 {
     protected $tmpl;
+    protected $currentBlock = array();
 
     public function __construct($tokenstream, $tmpl){
         $this->tmpl = $tmpl;
@@ -219,6 +223,9 @@ class TmplParser extends Parser
         }
         else if($this->currentType() == 'IncludeToken'){
             return $this->parseInclude();
+        }
+        else if($this->currentType() == 'ParentToken'){
+            return $this->parseParent();
         }
         else if($this->currentType() == 'ExtendsToken'){
             throw new SyntaxException($this->current(),
@@ -296,10 +303,12 @@ class TmplParser extends Parser
 
     protected function parseBlock(){
         $node = new BlockNode($this->current(), $this->tmpl);
+        $this->currentBlock[] = $node;
         $this->accept('BlockToken');
         while($this->currentType() != 'EndToken'){
             $node->addBody($this->parseStep());
         }
+        array_pop($this->currentBlock);
         $this->accept('EndToken');
         return $node;
     }
@@ -314,6 +323,18 @@ class TmplParser extends Parser
         $node = new IncludeNode($this->current());
         $this->accept('IncludeToken');
         return $node;
+    }
+
+    protected function parseParent(){
+        if(count($this->currentBlock) > 0){
+            $currentBlock = $this->currentBlock[count($this->currentBlock)-1];
+            $node = new ParentNode($currentBlock);
+            $this->accept('ParentToken');
+            return $node;
+        }
+        else{
+            throw new ContextException('Use of {% parent %} outside a block');
+        }
     }
 }
 
@@ -827,8 +848,8 @@ class BlockNode
         return $parent;
     }
 
-    public function evaluate($params){
-        if($this->child){
+    public function evaluate($params, $direct = false){
+        if(($this->child)&&(!$direct)){
             return $this->getUltimateChild()->evaluate($params);
         }
 
@@ -969,6 +990,24 @@ class IncludeNode
 
     public function evaluate($params){
         return $this->tmpl->render($params);
+    }
+}
+
+class ParentNode
+{
+    protected $block;
+    public function __construct($block){
+        $this->block = $block;
+    }
+
+    public function evaluate($params){
+        if($this->block->getParent()){
+            return $this->block->getParent()->evaluate($params, true);
+        }
+        else{
+            throw new ContextException(
+                'use of {% parent %} in a block without parent');
+        }
     }
 }
 
