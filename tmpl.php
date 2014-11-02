@@ -42,6 +42,9 @@ class Tmpl
                 else if(substr($match, 0, 3) == 'for'){
                     $controlTokens[] = new Token($match, 'ForToken');
                 }
+                else if(substr($match, 0, 5) == 'block'){
+                    $controlTokens[] = new Token($match, 'BlockToken');
+                }
                 else if(substr($match, 0, 3) == 'end'){
                     $controlTokens[] = new Token($match, 'EndToken');
                 }
@@ -143,6 +146,9 @@ class TmplParser extends Parser
         if($this->currentType() == 'TextToken'){
             return $this->parseText();
         }
+        else if($this->currentType() == 'BlockToken'){
+            return $this->parseBlock();
+        }
         else if($this->currentType() == 'IfToken'){
             return $this->parseIf();
         }
@@ -214,6 +220,16 @@ class TmplParser extends Parser
     protected function parseFor(){
         $node = new ForNode($this->current());
         $this->accept('ForToken');
+        while($this->currentType() != 'EndToken'){
+            $node->addBody($this->parseStep());
+        }
+        $this->accept('EndToken');
+        return $node;
+    }
+    
+    protected function parseBlock(){
+        $node = new BlockNode($this->current());
+        $this->accept('BlockToken');
         while($this->currentType() != 'EndToken'){
             $node->addBody($this->parseStep());
         }
@@ -679,6 +695,45 @@ class ForNode
                 $output .= $slice->evaluate($params);
             }
         }
+        return $output;
+    }
+}
+
+class BlockNode
+{
+    protected $name = '';
+    protected $body = array();
+
+    public function __construct($token){
+        $text = trim($token->getText(), '{%');
+        $text = trim($text, '%}');
+        $text = trim($text);
+        $text = substr($text, 5); // cut off 'block'
+        $text = trim($text);
+
+        $this->name = $text;
+    }
+
+    public function setBody($nodeArray){
+        $this->body = $nodeArray;
+    }
+
+    public function addBody($node){
+        $this->body[] = $node;
+    }
+
+    public function evaluate($params){
+        $output = '';
+//         $collection = $this->collection->evaluate($params);
+// 
+//         foreach($collection as $i){
+//             foreach($this->body as $slice){
+//                 // set iterator variable
+//                 $params[$this->iterator] = $i;
+//                 // evaluate body
+//                 $output .= $slice->evaluate($params);
+//             }
+//         }
         return $output;
     }
 }
